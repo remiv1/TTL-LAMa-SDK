@@ -28,13 +28,14 @@ test-oidc:
 test-vpn:
 	bash scripts/test-vpn.sh $(TEST_ARGS)
 
-build: test
+build:
 	$(PYTHON) -m build --outdir "$(DIST_DIR)" python
 
-package-check: build
+package-check:
+	$(PYTHON) -m build --outdir "$(DIST_DIR)" python
 	$(PYTHON) -m twine check "$(DIST_DIR)"/ttlama_sdk-$(VERSION)*
 
-check: package-check
+check: test package-check
 
 publish: check
 	@test -n "$${TWINE_PASSWORD:-}" || { printf 'TWINE_PASSWORD must contain a PyPI API token.\n' >&2; exit 1; }
