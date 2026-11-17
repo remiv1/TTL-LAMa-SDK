@@ -1,0 +1,14 @@
+ARG TTL_LAMA_SDK_SERVER_IMAGE=ghcr.io/remiv1/ttl-lama:latest
+FROM ${TTL_LAMA_SDK_SERVER_IMAGE}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+USER root
+WORKDIR /opt/ttl-lama-sdk
+COPY python/ ./python/
+RUN python -m pip install --no-cache-dir './python[test]'
+
+USER nobody
+ENTRYPOINT []
+CMD ["python", "-m", "pytest", "-v", "-ra", "-p", "no:cacheprovider", "python/tests/integration"]

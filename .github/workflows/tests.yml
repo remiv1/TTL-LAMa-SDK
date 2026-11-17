@@ -1,0 +1,69 @@
+name: SDK tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test ${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [unit, oidc, vpn]
+    env:
+      TERM: xterm-256color
+      TTL_LAMA_TEST_OOM_SCORE_ADJ: "1000"
+    steps:
+      - name: Checkout TTL-LAMa
+        uses: actions/checkout@v5
+        with:
+          repository: remiv1/TTL-LAMa
+          path: ttlama
+
+      - name: Checkout CLI submodule
+        run: git -C ttlama submodule update --init cli
+
+      - name: Checkout SDK
+        uses: actions/checkout@v5
+        with:
+          path: ttlama/sdk
+
+      - name: Install Podman Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes podman python3-venv
+          python3 -m venv "$RUNNER_TEMP/podman-compose"
+          "$RUNNER_TEMP/podman-compose/bin/python" -m pip install podman-compose==1.6.0
+          printf 'PODMAN_COMPOSE_PROVIDER=%s\n' "$RUNNER_TEMP/podman-compose/bin/podman-compose" >> "$GITHUB_ENV"
+
+      - name: Run SDK suite
+        working-directory: ttlama/sdk
+        run: bash "scripts/test-${{ matrix.suite }}.sh"
+
+  package:
+    name: Check Python package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout SDK
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install release tools in a virtual environment
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install './python[release]'
+
+      - name: Build and verify distributions
+        run: make package-check PYTHON="$PWD/.venv/bin/python"

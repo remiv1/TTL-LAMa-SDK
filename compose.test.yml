@@ -1,0 +1,129 @@
+services:
+  dex:
+    image: docker.io/dexidp/dex:v2.46.1-alpine
+    command: ["dex", "serve", "/etc/dex/cfg/config.yaml"]
+    environment:
+      DEX_CONFIG: /etc/dex/cfg/config.yaml
+      DEX_SESSIONS_ENABLED: "true"
+    volumes:
+      - ../src/dex/config.yaml:/etc/dex/cfg/config.yaml:ro,z
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5556/dex/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    oom_score_adj: ${TTL_LAMA_TEST_OOM_SCORE_ADJ:-0}
+
+  wireguard-backend:
+    image: localhost/ttl-lama-sdk-wireguard-backend:test
+    build:
+      context: ../cli
+      dockerfile: Dockerfile.test
+      target: wireguard-backend
+    environment:
+      TTL_LAMA_TEST_WIREGUARD_INTERFACE: wg0
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - wireguard-test-ssh:/run/ttl-lama-test
+    healthcheck:
+      test: ["CMD", "ssh-keyscan", "-T", "2", "-t", "ed25519", "127.0.0.1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    oom_score_adj: ${TTL_LAMA_TEST_OOM_SCORE_ADJ:-0}
+
+  server:
+    image: ${TTL_LAMA_SDK_SERVER_IMAGE:-ghcr.io/remiv1/ttl-lama:latest}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        cp /etc/ttl-lama/config.yml /tmp/ttlama-config.yml
+        mkdir -p /tmp/ttlama-ssh
+        ssh-keygen -q -t ed25519 -N "" -f /tmp/ttlama-ssh/id_ed25519
+        rm -f /run/ttl-lama-test/authorized_keys
+        cp /tmp/ttlama-ssh/id_ed25519.pub /run/ttl-lama-test/authorized_keys
+        ssh-keyscan -T 5 -t ed25519 wireguard-backend > /tmp/ttlama-ssh/known_hosts
+        cat > /tmp/ttlama-ssh/ssh_config.yml <<'EOF'
+        ssh_config:
+          host: wireguard-backend
+          port: 22
+          user: ttl-lama
+          identity_file: /tmp/ttlama-ssh/id_ed25519
+          known_hosts_file: /tmp/ttlama-ssh/known_hosts
+          connection_timeout: 10
+        EOF
+        export TTL_LAMA_SSH_CONFIG_FILE=/tmp/ttlama-ssh/ssh_config.yml
+        exec sh /opt/ttl-lama/src/entrypoint.sh
+    environment:
+      TTL_LAMA_CONFIG_FILE: /tmp/ttlama-config.yml
+      TTL_LAMA_SECRET_KEY_FILE: /data/flask_secret_key
+      TTL_LAMA_FLASK_ENV: development
+      TTL_LAMA_ADMIN_USERNAME: sdk-integration-admin
+      TTL_LAMA_ADMIN_PASSWORD: sdk-integration-password
+      TTL_LAMA_SESSION_COOKIE_SECURE: "false"
+      TTL_LAMA_ENFORCE_SECURE_CONNECTION: "false"
+    volumes:
+      - wireguard-test-ssh:/run/ttl-lama-test
+    depends_on:
+      wireguard-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    oom_score_adj: ${TTL_LAMA_TEST_OOM_SCORE_ADJ:-0}
+
+  oidc-server:
+    image: ${TTL_LAMA_SDK_SERVER_IMAGE:-ghcr.io/remiv1/ttl-lama:latest}
+    environment:
+      TTL_LAMA_SECRET_KEY_FILE: /data/flask_secret_key
+      TTL_LAMA_FLASK_ENV: development
+      TTL_LAMA_AUTH_MODE: external
+      TTL_LAMA_ADMIN_USERNAME: admin
+      TTL_LAMA_OIDC_ISSUER: http://dex:5556/dex
+      TTL_LAMA_OIDC_CLIENT_ID: ttl-lama-dex
+      TTL_LAMA_OIDC_CLIENT_SECRET: ttl-lama-test-secret
+      TTL_LAMA_OIDC_REDIRECT_URI: http://127.0.0.1:8080/auth/callback
+      TTL_LAMA_SESSION_COOKIE_SECURE: "false"
+      TTL_LAMA_ENFORCE_SECURE_CONNECTION: "false"
+    depends_on:
+      dex:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    oom_score_adj: ${TTL_LAMA_TEST_OOM_SCORE_ADJ:-0}
+
+  sdk-tests:
+    image: localhost/ttl-lama-sdk-tests:test
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      args:
+        TTL_LAMA_SDK_SERVER_IMAGE: ${TTL_LAMA_SDK_SERVER_IMAGE:-ghcr.io/remiv1/ttl-lama:latest}
+    environment:
+      TTL_LAMA_CONFIG_FILE: /dev/null
+      TTLAMA_TEST_SERVER_URL: http://server:8080
+      TTLAMA_TEST_ADMIN_USERNAME: sdk-integration-admin
+      TTLAMA_TEST_ADMIN_PASSWORD: sdk-integration-password
+      TTLAMA_TEST_OIDC_SERVER_URL: http://oidc-server:8080
+      TTLAMA_TEST_OIDC_USERNAME: admin@example.com
+      TTLAMA_TEST_OIDC_PASSWORD: password
+    depends_on:
+      server:
+        condition: service_healthy
+      oidc-server:
+        condition: service_healthy
+    oom_score_adj: ${TTL_LAMA_TEST_OOM_SCORE_ADJ:-0}
+
+volumes:
+  wireguard-test-ssh:
