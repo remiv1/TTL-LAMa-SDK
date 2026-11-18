@@ -14,7 +14,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Intended Audience :: Developers"
 ]
-version = "0.1.0"
+version = "0.1.1"
 urls = { "Repository" = "https://github.com/remiv1/TTL-LAMa-SDK" }
 description = "Python client for the TTL-LAMa API"
 readme = "README.md"
@@ -34,6 +34,9 @@ release = ["build>=1,<2", "twine>=7,<8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+ttlama_sdk = ["py.typed", "*.pyi"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
